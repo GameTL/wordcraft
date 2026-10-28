@@ -38,6 +38,8 @@ log = "0.4"
 # All date/time conversion goes through chrono (no hand-rolled calendar code beyond the 400-year range extension; AGENTS.md).
 chrono = { version = "0.4.45", default-features = false, features = ["std"] }
 proptest = "1"
+# Pinyin readings per Han character for Phonetic Guide (#3384): MIT, mozillazg/rust-pinyin over the pinyin-data table, pure Rust, no unsafe, builds for wasm.
+pinyin = { version = "0.11", default-features = false, features = ["with_tone"] }
 rayon = "1"
 unicode-bidi = "0.3"
 unicode-segmentation = "1"

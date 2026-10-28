@@ -271,6 +271,7 @@ fn phonetic_guide_ruby_box_takes_the_keyboard_on_open() {
     );
     h.get_by_role_and_label(Role::SpinButton, "Offset (pt):");
     h.get_by_role_and_label(Role::SpinButton, "Size (pt):");
+    h.get_by_role_and_label(Role::Button, "Mono Ruby");
     h.event(egui::Event::Text("ab".into()));
     h.run_steps(2);
     match h.state().dialog.as_ref() {

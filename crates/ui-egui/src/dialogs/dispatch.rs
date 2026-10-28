@@ -881,18 +881,23 @@ fn phonetic_dialog(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
         ui.add(egui::DragValue::new(size).speed(0.5).range(1.0..=200.0)).labelled_by(size_label.id);
         ui.end_row();
     });
-    let mut remove = false;
+    let (mut remove, mut mono) = (false, false);
+    ui.add_space(4.0);
     if *existing {
-        ui.add_space(4.0);
         remove = ui.button(tl!("Remove")).clicked();
+    } else {
+        // Word's Mono Ruby: one guide per character, the readings split at the spaces (#3384).
+        mono = ui.button(tl!("Mono Ruby")).clicked();
     }
     let (ok, cancel) = buttons(ui, tl!("OK"));
     if remove {
         let _ = app.run("format.phonetic", json!({"ruby": null}));
+    } else if mono {
+        let _ = app.run("format.phonetic", json!({"ruby": ruby, "mono": true, "align": align, "size": *size, "offset": *offset}));
     } else if ok {
         let _ = app.run("format.phonetic", json!({"ruby": ruby, "align": align, "size": *size, "offset": *offset}));
     }
-    ok || cancel || remove
+    ok || cancel || remove || mono
 }
 
 fn new_style_dialog(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {

@@ -111,6 +111,18 @@ pub(super) fn context_menu(app: &mut WordApp, ui: &mut Ui) {
     item(ui, app, "Font…", "ui.dialog", json!({"name": "font"}));
     item(ui, app, "Paragraph…", "ui.dialog", json!({"name": "paragraph"}));
     item(ui, app, "Link…", "ui.dialog", json!({"name": "link"}));
+    // Chinese text gets its pinyin from here, as in Keynote (#3384).
+    if !app.session.sel.is_collapsed() {
+        let ph = wordcraft_engine::cmd::phonetic::state(&app.session);
+        let existing = ph["existing"].as_bool() == Some(true);
+        let suggested = ph["ruby"].as_str().is_some_and(|r| !r.is_empty());
+        if existing || suggested {
+            item(ui, app, "Phonetic Guide…", "format.phonetic", json!({}));
+        }
+        if suggested && !existing {
+            item(ui, app, "Add Pinyin", "format.phonetic", json!({"mono": true}));
+        }
+    }
     item(ui, app, "New Comment", "review.newComment", json!({}));
     if !wordcraft_engine::cmd::fields::selected(&app.session).is_empty() {
         ui.separator();
