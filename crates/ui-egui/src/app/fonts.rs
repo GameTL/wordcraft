@@ -151,6 +151,25 @@ impl WordApp {
         }
     }
 
+    /// Phonetic Guide draws its base characters with the interface faces. Those have no Han, and
+    /// `want_system_cjk` only loads a UI font when the *menus* need one, so an English interface
+    /// showed 中 as a box. Borrow the document fallback already loaded for the page (#3384).
+    /// CJK collections are large; the cap on IME/caption faces does not apply here.
+    pub(crate) fn ensure_phonetic_fonts(&mut self, text: &str) {
+        self.want_system_cjk = true;
+        for c in text.chars().filter(|c| wordcraft_fonts::is_cjk(*c)) {
+            if self.canvas.ime_faces.iter().any(|f| f.covers(c)) {
+                continue;
+            }
+            let Some(f) = wordcraft_fonts::FontDb::global().fallback_for(c, u32::MAX) else { continue };
+            if self.canvas.ime_faces.iter().any(|h| h.id() == f.id()) {
+                continue;
+            }
+            self.canvas.ime_faces.push(f);
+            self.styled = false;
+        }
+    }
+
     /// Install the interface fonts when the language, the CJK fallback, or a caption fallback
     /// face has changed since the last install.
     pub(super) fn install_ui_fonts(&mut self, ctx: &egui::Context, lang: i18n::Lang) {

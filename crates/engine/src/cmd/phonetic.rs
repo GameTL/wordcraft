@@ -167,7 +167,28 @@ fn phonetic(s: &mut Session, v: &Value) -> CmdResult {
 /// Mono Ruby: a guide over each Chinese character of the selection (which may span paragraphs
 /// of one story). `readings` go to those characters in order; empty, each gets its pinyin.
 /// Existing guides, pictures, tabs and other text stay, so a second run only fills the gaps.
+fn unwrap_existing_ruby(s: &mut Session) -> Result<(), CmdError> {
+    let Some(at) = ruby_at(s) else { return Ok(()) };
+    let end = Pos { off: at.off + OBJ.len_utf8(), ..at.clone() };
+    let para = s.doc.para_at(&at).ok_or_else(|| CmdError::Failed("no paragraph at the selection".into()))?;
+    let Some(InlineObject::Ruby { base, .. }) = para.object_at(at.off) else { return Ok(()) };
+    if base.is_empty() {
+        return Ok(());
+    }
+    let base = base.clone();
+    let props = para.props_of_char(at.off).clone();
+    s.doc.delete_range(&at, &end)?;
+    let stop = s.doc.insert_text(&at, &base, &props)?;
+    s.sel = Selection { anchor: at, focus: stop };
+    Ok(())
+}
+
+/// Mono Ruby: a guide over each Chinese character of the selection (which may span paragraphs
+/// of one story). `readings` go to those characters in order; empty, each gets its pinyin.
+/// Existing guides, pictures, tabs and other text stay, so a second run only fills the gaps.
+/// A selected group guide is unwrapped first, so Mono Ruby can split it per character.
 fn mono(s: &mut Session, readings: Vec<String>, align: Option<RubyAlign>, size: Option<f32>, offset: Option<f32>) -> CmdResult {
+    unwrap_existing_ruby(s)?;
     let (a, b) = s.sel.ordered();
     if a == b {
         return Err(CmdError::Failed("select the Chinese text to add pinyin to".into()));
@@ -252,6 +273,25 @@ fn default_size(base: f32) -> f32 {
     (base.floor() / 2.0).max(1.0)
 }
 
+/// One dialog cell per Chinese character of `base`. Typed `ruby` words (space-separated) win when
+/// there are as many as characters; otherwise each character's pinyin. Empty for Japanese text
+/// (kana in the base or the reading, or a Japanese language).
+fn units_of(s: &Session, base: &str, ruby: &str, at: &Pos) -> Vec<Value> {
+    if japanese(s, base, at) || ruby.chars().any(kana) {
+        return Vec::new();
+    }
+    let chars: Vec<char> = base.chars().filter(|c| pinyin_of(*c).is_some()).collect();
+    let words: Vec<&str> = ruby.split_whitespace().collect();
+    chars
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| {
+            let r = if words.len() == chars.len() { words.get(i).copied().unwrap_or("") } else { pinyin_of(*c).unwrap_or("") };
+            (!r.is_empty()).then(|| json!({"base": c.to_string(), "ruby": r}))
+        })
+        .collect()
+}
+
 /// What the Phonetic Guide shows for the selection: its ruby, or the selected text with defaults
 /// (and its pinyin when it's Chinese).
 pub fn state(s: &Session) -> Value {
@@ -261,19 +301,14 @@ pub fn state(s: &Session) -> Value {
         let bs = if *bs > 0.0 { *bs } else { base_size(s, &at) };
         // `+ 0.0` turns a rounded -0 into 0.
         let offset = (ruby_offset(*raise, bs, *size) * 10.0).round() / 10.0 + 0.0;
-        let units = json!([{"base": base, "ruby": ruby}]);
+        let units = units_of(s, base, ruby, &at);
         return json!({"base": base, "ruby": ruby, "align": align.ooxml(), "size": size, "offset": offset, "existing": true, "units": units, "baseSize": bs});
     }
     let (a, b) = s.sel.ordered();
     let base = if a.story == b.story && a.path == b.path { s.selected_text() } else { String::new() };
     let base: String = base.chars().filter(|c| !c.is_control() && *c != OBJ).take(MAX_CHARS).collect();
     let ruby = suggest(s, &base, &a);
-    // One unit per character with a reading (what Mono Ruby guides); none for Japanese text.
-    let units: Vec<Value> = if ruby.is_empty() {
-        Vec::new()
-    } else {
-        base.chars().filter_map(|c| pinyin_of(c).map(|r| json!({"base": c.to_string(), "ruby": r}))).collect()
-    };
+    let units = units_of(s, &base, &ruby, &a);
     let bsz = base_size(s, &a);
     json!({"base": base, "ruby": ruby, "align": "center", "size": default_size(bsz), "offset": 0.0, "existing": false, "units": units, "baseSize": bsz})
 }
@@ -357,9 +392,15 @@ mod tests {
         assert_eq!(s.run("format.phonetic", &json!({})).unwrap()["units"], json!([]));
         let mut s = session("中国");
         s.run("select.all", &json!({})).unwrap();
+        s.run("format.phonetic", &json!({"ruby": "zhōng guó"})).unwrap();
+        let r = s.run("format.phonetic", &json!({})).unwrap();
+        assert_eq!(r["units"], json!([{"base": "中", "ruby": "zhōng"}, {"base": "国", "ruby": "guó"}]));
+        // No spaces in the reading: each character's pinyin, not one cell for the whole group.
+        let mut s = session("中国");
+        s.run("select.all", &json!({})).unwrap();
         s.run("format.phonetic", &json!({"ruby": "zhōngguó"})).unwrap();
         let r = s.run("format.phonetic", &json!({})).unwrap();
-        assert_eq!(r["units"], json!([{"base": "中国", "ruby": "zhōngguó"}]));
+        assert_eq!(r["units"], json!([{"base": "中", "ruby": "zhōng"}, {"base": "国", "ruby": "guó"}]));
     }
 
     fn rubies(p: &Paragraph) -> Vec<(String, String, String)> {
@@ -370,6 +411,18 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// #3384: Mono Ruby on a group guide splits it into one reading per character.
+    #[test]
+    fn mono_ruby_splits_a_group_guide() {
+        let mut s = session("中国");
+        s.run("select.all", &json!({})).unwrap();
+        s.run("format.phonetic", &json!({"ruby": "zhōng guó"})).unwrap();
+        assert_eq!(para(&s).objects.len(), 1);
+        s.run("format.phonetic", &json!({"mono": true, "ruby": "zhōng guó"})).unwrap();
+        let got: Vec<_> = rubies(&para(&s)).into_iter().map(|(b, r, _)| format!("{b}:{r}")).collect();
+        assert_eq!(got, ["中:zhōng", "国:guó"]);
     }
 
     /// #3384: Mono Ruby puts each Chinese character's pinyin over it, leaves Latin text alone,

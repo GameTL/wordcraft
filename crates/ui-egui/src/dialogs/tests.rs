@@ -314,10 +314,10 @@ fn phonetic_guide_edits_a_reading_per_character() {
     h.get_by_role_and_label(Role::Button, "Group Ruby").click();
     h.run_steps(3);
     match h.state().dialog.as_ref() {
-        Some(Dialog::Phonetic { group: true, ruby, .. }) => assert_eq!(ruby, "yín háng"),
-        _ => panic!("Group layout"),
+        Some(Dialog::Phonetic { group: true, units, .. }) => assert_eq!(units.iter().map(|(_, r)| r.as_str()).collect::<Vec<_>>(), ["yín", "háng"]),
+        _ => panic!("Group apply-mode keeps a cell per character"),
     }
-    h.get_by_role_and_label(Role::TextInput, "Ruby text:");
+    h.get_by_role_and_label(Role::TextInput, "Ruby text for 银");
     h.get_by_role_and_label(Role::Button, "Mono Ruby").click();
     h.run_steps(3);
     h.get_by_role_and_label(Role::Button, "OK").click();
@@ -333,6 +333,31 @@ fn phonetic_guide_edits_a_reading_per_character() {
         })
         .unwrap_or_default();
     assert_eq!(rubies, ["yín", "háng"]);
+}
+
+/// #3384: an existing group guide still opens a cell per character, so a wrong reading can be
+/// corrected without retyping the whole string.
+#[test]
+fn phonetic_guide_over_an_existing_group_still_has_a_cell_per_character() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::Queryable;
+    let mut app = app_with("中国");
+    let _ = app.run("select.all", json!({}));
+    let _ = app.run("format.phonetic", json!({"ruby": "zhōng guó"}));
+    let _ = app.run("ui.dialog", json!({"name": "phonetic"}));
+    assert!(matches!(&app.dialog, Some(Dialog::Phonetic { group: true, units, .. }) if units.len() == 2));
+    let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).allow_missing_glyphs().build_ui_state(
+        |ui, app: &mut WordApp| {
+            let ctx = ui.ctx().clone();
+            app.logic(&ctx);
+            app.ui(ui);
+        },
+        app,
+    );
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::TextInput, "Ruby text for 中");
+    h.get_by_role_and_label(Role::TextInput, "Ruby text for 国");
+    h.get_by_role_and_label(Role::Button, "Mono Ruby");
 }
 
 /// #2986: a box that keeps the keyboard asks for focus only while it lacks it. `request_focus`

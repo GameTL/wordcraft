@@ -624,9 +624,14 @@ fn system_cjk_font(hans: bool, korean: bool) -> Option<&'static wordcraft_fonts:
         let mut needed = wordcraft_fonts::ui_uncovered_cjk(&catalogs, &embedded);
         if needed.is_empty() {
             needed = wordcraft_fonts::ui_uncovered_cjk(&[&names], &embedded);
-            if needed.is_empty() {
-                return None;
-            }
+        }
+        // English menus have no CJK, so the catalog check above is empty; Phonetic Guide and other
+        // document CJK in the interface still need a face (#3384).
+        if needed.is_empty() {
+            needed = wordcraft_fonts::ui_uncovered_cjk(&["中の한"], &embedded);
+        }
+        if needed.is_empty() {
+            return None;
         }
         log::debug!("interface: {} CJK characters lack an embedded glyph", needed.len());
         wordcraft_fonts::system_cjk_ui_font_for(hans, korean, &needed)
