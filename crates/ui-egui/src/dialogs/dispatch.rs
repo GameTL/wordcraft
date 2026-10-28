@@ -893,7 +893,8 @@ fn phonetic_dialog(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
     if remove {
         let _ = app.run("format.phonetic", json!({"ruby": null}));
     } else if mono {
-        let _ = app.run("format.phonetic", json!({"ruby": ruby, "mono": true, "align": align, "size": *size, "offset": *offset}));
+        // A reading count that doesn't match the characters keeps the dialog and the typed readings.
+        mono = app.run("format.phonetic", json!({"ruby": ruby, "mono": true, "align": align, "size": *size, "offset": *offset})).is_ok();
     } else if ok {
         let _ = app.run("format.phonetic", json!({"ruby": ruby, "align": align, "size": *size, "offset": *offset}));
     }
