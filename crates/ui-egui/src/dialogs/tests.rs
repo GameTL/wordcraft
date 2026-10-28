@@ -254,6 +254,10 @@ fn phonetic_guide_ruby_box_takes_the_keyboard_on_open() {
     app.dialog = Some(Dialog::Phonetic {
         base: "Unchanged".into(),
         ruby: String::new(),
+        units: Vec::new(),
+        original: Vec::new(),
+        group: true,
+        base_size: 24.0,
         align: "center".into(),
         size: 12.0,
         offset: 0.0,
@@ -272,12 +276,63 @@ fn phonetic_guide_ruby_box_takes_the_keyboard_on_open() {
     h.get_by_role_and_label(Role::SpinButton, "Offset (pt):");
     h.get_by_role_and_label(Role::SpinButton, "Size (pt):");
     h.get_by_role_and_label(Role::Button, "Mono Ruby");
+    h.get_by_role_and_label(Role::Button, "Group Ruby");
     h.event(egui::Event::Text("ab".into()));
     h.run_steps(2);
     match h.state().dialog.as_ref() {
         Some(Dialog::Phonetic { ruby, .. }) => assert_eq!(ruby, "ab", "the typed text reaches the Ruby text box"),
         _ => panic!("the Phonetic Guide dialog is still open"),
     }
+}
+
+/// #3384: over Chinese text the dialog opens in Mono layout with a named box per character; OK
+/// puts the (corrected) readings on the characters, Group Ruby joins them into one box.
+#[test]
+fn phonetic_guide_edits_a_reading_per_character() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::Queryable;
+    let mut app = app_with("银行");
+    let _ = app.run("select.all", json!({}));
+    let _ = app.run("ui.dialog", json!({"name": "phonetic"}));
+    assert!(matches!(&app.dialog, Some(Dialog::Phonetic { group: false, units, .. }) if units.len() == 2));
+    // The harness has no CJK font (the app loads one at run time): missing glyphs draw as tofu.
+    let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1440.0, 900.0)).allow_missing_glyphs().build_ui_state(
+        |ui, app: &mut WordApp| {
+            let ctx = ui.ctx().clone();
+            app.logic(&ctx);
+            app.ui(ui);
+        },
+        app,
+    );
+    h.run_steps(4);
+    assert!(h.get_by_role_and_label(Role::TextInput, "Ruby text for 银").is_focused(), "the first reading takes the keyboard");
+    h.get_by_role_and_label(Role::TextInput, "Ruby text for 行");
+    if let Some(Dialog::Phonetic { units, .. }) = h.state_mut().dialog.as_mut() {
+        units[1].1 = "háng".into();
+    }
+    h.run_steps(2);
+    h.get_by_role_and_label(Role::Button, "Group Ruby").click();
+    h.run_steps(3);
+    match h.state().dialog.as_ref() {
+        Some(Dialog::Phonetic { group: true, ruby, .. }) => assert_eq!(ruby, "yín háng"),
+        _ => panic!("Group layout"),
+    }
+    h.get_by_role_and_label(Role::TextInput, "Ruby text:");
+    h.get_by_role_and_label(Role::Button, "Mono Ruby").click();
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::Button, "OK").click();
+    h.run_steps(3);
+    assert!(h.state().dialog.is_none());
+    let rubies: Vec<_> = h
+        .state()
+        .session
+        .doc
+        .para_at(&wordcraft_doc::Pos::body(0, 0))
+        .map(|p| {
+            p.objects.iter().filter_map(|o| if let wordcraft_doc::InlineObject::Ruby { ruby, .. } = o { Some(ruby.clone()) } else { None }).collect()
+        })
+        .unwrap_or_default();
+    assert_eq!(rubies, ["yín", "háng"]);
 }
 
 /// #2986: a box that keeps the keyboard asks for focus only while it lacks it. `request_focus`

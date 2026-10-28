@@ -6,6 +6,7 @@ use super::forms::{cell_margins_dialog, custom_properties, table_properties};
 use super::mailings::{ADDRESS_PARTS, recipient_list, rule_params};
 use super::page_setup::{page_layout_commands, page_paper_group, page_valign_combo, page_valign_value, run_as_one_step};
 use super::paragraph::{ParaNumber, apply_paragraph, para_check, para_number};
+use super::phonetic::phonetic_dialog;
 use super::styles::manage_styles;
 use super::{Dialog, MeasureExt, Tokens, Ui, Value, WordApp, json, semibold, vec2};
 
@@ -838,67 +839,6 @@ fn watermark_dialog(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
         let _ = app.run("design.watermark", json!({"text": text, "diagonal": *diagonal}));
     }
     ok || cancel
-}
-
-fn phonetic_dialog(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
-    let Dialog::Phonetic { base, ruby, align, size, offset, existing, focus } = d else {
-        return false;
-    };
-    // Base and ruby text are usually Chinese or Japanese: fonts for them load from the next frame.
-    app.want_system_cjk = true;
-    const ALIGNS: [(&str, &str); 6] = [
-        ("center", "Center"),
-        ("distributeLetter", "Distribute letters"),
-        ("distributeSpace", "Distribute spacing"),
-        ("left", "Left"),
-        ("right", "Right"),
-        ("rightVertical", "Right (vertical)"),
-    ];
-    egui::Grid::new("phonetic").num_columns(2).spacing(vec2(10.0, 6.0)).show(ui, |ui| {
-        ui.label(tl!("Base text:"));
-        ui.label(egui::RichText::new(base.as_str()).strong());
-        ui.end_row();
-        let ruby_label = ui.label(tl!("Ruby text:"));
-        let r = ui.text_edit_singleline(ruby).labelled_by(ruby_label.id);
-        // Typing goes to the Ruby text box, not the selected text in the document (#3914).
-        if std::mem::take(focus) {
-            r.request_focus();
-        }
-        ui.end_row();
-        let align_label = ui.label(tl!("Alignment:"));
-        let shown = ALIGNS.iter().find(|(k, _)| k == align).map_or("Center", |(_, l)| l);
-        let combo = craft_ui::ComboBox::from_id_salt("phonetic_align").selected_text(tl!(shown)).show_ui(ui, |ui| {
-            for (k, l) in ALIGNS {
-                ui.selectable_value(align, k.to_string(), tl!(l));
-            }
-        });
-        combo.response.labelled_by(align_label.id);
-        ui.end_row();
-        let offset_label = ui.label(tl!("Offset (pt):"));
-        ui.add(egui::DragValue::new(offset).speed(0.5).range(-100.0..=100.0)).labelled_by(offset_label.id);
-        ui.end_row();
-        let size_label = ui.label(tl!("Size (pt):"));
-        ui.add(egui::DragValue::new(size).speed(0.5).range(1.0..=200.0)).labelled_by(size_label.id);
-        ui.end_row();
-    });
-    let (mut remove, mut mono) = (false, false);
-    ui.add_space(4.0);
-    if *existing {
-        remove = ui.button(tl!("Remove")).clicked();
-    } else {
-        // Word's Mono Ruby: one guide per character, the readings split at the spaces (#3384).
-        mono = ui.button(tl!("Mono Ruby")).clicked();
-    }
-    let (ok, cancel) = buttons(ui, tl!("OK"));
-    if remove {
-        let _ = app.run("format.phonetic", json!({"ruby": null}));
-    } else if mono {
-        // A reading count that doesn't match the characters keeps the dialog and the typed readings.
-        mono = app.run("format.phonetic", json!({"ruby": ruby, "mono": true, "align": align, "size": *size, "offset": *offset})).is_ok();
-    } else if ok {
-        let _ = app.run("format.phonetic", json!({"ruby": ruby, "align": align, "size": *size, "offset": *offset}));
-    }
-    ok || cancel || remove || mono
 }
 
 fn new_style_dialog(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {

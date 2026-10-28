@@ -28,6 +28,7 @@ mod forms;
 mod mailings;
 mod page_setup;
 mod paragraph;
+mod phonetic;
 mod styles;
 
 use bookmarks::bookmark_at_caret;
@@ -222,7 +223,16 @@ pub enum Dialog {
     /// Home › Font › Phonetic Guide: ruby text over the selected text (`format.phonetic`).
     Phonetic {
         base: String,
+        /// The Group layout's single reading (Mono keeps its readings in `units`).
         ruby: String,
+        /// Mono layout: (character, reading) for each Chinese character, empty when there are none.
+        units: Vec<(String, String)>,
+        /// The engine's default reading of each unit (what an emptied box or a count mismatch restores).
+        original: Vec<String>,
+        /// Group layout (one guide over the whole text) instead of Mono (one per character).
+        group: bool,
+        /// The selection's font size, pt (the preview's scale).
+        base_size: f32,
         /// OOXML alignment name (`center`, `distributeLetter`…).
         align: String,
         size: f32,
@@ -718,13 +728,25 @@ impl Dialog {
                 let v = wordcraft_engine::cmd::phonetic::state(&app.session);
                 let f = |k: &str| v.get(k).and_then(Value::as_f64).unwrap_or(0.0) as f32;
                 let s = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                let existing = v.get("existing").and_then(Value::as_bool).unwrap_or(false);
+                // An existing guide is edited as one group; Mono only starts new guides.
+                let units: Vec<(String, String)> = match v.get("units").and_then(Value::as_array) {
+                    Some(u) if !existing => {
+                        u.iter().map(|u| (u["base"].as_str().unwrap_or("").to_string(), u["ruby"].as_str().unwrap_or("").to_string())).collect()
+                    }
+                    _ => Vec::new(),
+                };
                 Dialog::Phonetic {
                     base: s("base"),
                     ruby: s("ruby"),
+                    original: units.iter().map(|(_, r)| r.clone()).collect(),
+                    group: existing || units.is_empty(),
+                    units,
+                    base_size: f("baseSize"),
                     align: s("align"),
                     size: f("size"),
                     offset: f("offset"),
-                    existing: v.get("existing").and_then(Value::as_bool).unwrap_or(false),
+                    existing,
                     focus: true,
                 }
             }

@@ -261,13 +261,21 @@ pub fn state(s: &Session) -> Value {
         let bs = if *bs > 0.0 { *bs } else { base_size(s, &at) };
         // `+ 0.0` turns a rounded -0 into 0.
         let offset = (ruby_offset(*raise, bs, *size) * 10.0).round() / 10.0 + 0.0;
-        return json!({"base": base, "ruby": ruby, "align": align.ooxml(), "size": size, "offset": offset, "existing": true});
+        let units = json!([{"base": base, "ruby": ruby}]);
+        return json!({"base": base, "ruby": ruby, "align": align.ooxml(), "size": size, "offset": offset, "existing": true, "units": units, "baseSize": bs});
     }
     let (a, b) = s.sel.ordered();
     let base = if a.story == b.story && a.path == b.path { s.selected_text() } else { String::new() };
     let base: String = base.chars().filter(|c| !c.is_control() && *c != OBJ).take(MAX_CHARS).collect();
     let ruby = suggest(s, &base, &a);
-    json!({"base": base, "ruby": ruby, "align": "center", "size": default_size(base_size(s, &a)), "offset": 0.0, "existing": false})
+    // One unit per character with a reading (what Mono Ruby guides); none for Japanese text.
+    let units: Vec<Value> = if ruby.is_empty() {
+        Vec::new()
+    } else {
+        base.chars().filter_map(|c| pinyin_of(c).map(|r| json!({"base": c.to_string(), "ruby": r}))).collect()
+    };
+    let bsz = base_size(s, &a);
+    json!({"base": base, "ruby": ruby, "align": "center", "size": default_size(bsz), "offset": 0.0, "existing": false, "units": units, "baseSize": bsz})
 }
 
 #[cfg(test)]
@@ -334,6 +342,24 @@ mod tests {
         let r = s.run("format.phonetic", &json!({})).unwrap();
         assert_eq!((r["base"].as_str(), r["existing"].as_bool()), (Some("read"), Some(false)));
         assert!(s.run("format.phonetic", &json!({"ruby": "x", "align": "sideways"})).is_err());
+    }
+
+    /// #3384: the dialog state lists one unit per character with a reading, none for Japanese.
+    #[test]
+    fn the_dialog_state_lists_a_unit_per_character() {
+        let mut s = session("我爱a");
+        s.run("select.all", &json!({})).unwrap();
+        let r = s.run("format.phonetic", &json!({})).unwrap();
+        assert_eq!(r["units"], json!([{"base": "我", "ruby": "wǒ"}, {"base": "爱", "ruby": "ài"}]));
+        assert!(r["baseSize"].as_f64().is_some_and(|b| b > 0.0));
+        let mut s = session("漢字かな");
+        s.run("select.all", &json!({})).unwrap();
+        assert_eq!(s.run("format.phonetic", &json!({})).unwrap()["units"], json!([]));
+        let mut s = session("中国");
+        s.run("select.all", &json!({})).unwrap();
+        s.run("format.phonetic", &json!({"ruby": "zhōngguó"})).unwrap();
+        let r = s.run("format.phonetic", &json!({})).unwrap();
+        assert_eq!(r["units"], json!([{"base": "中国", "ruby": "zhōngguó"}]));
     }
 
     fn rubies(p: &Paragraph) -> Vec<(String, String, String)> {
